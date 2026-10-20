@@ -285,7 +285,7 @@ interface ISmartModelStatus {
 interface IAppConfig {
   operationMode?: 'standard' | 'simple'
   modeSelected?: boolean
-  core: 'mihomo' | 'mihomo-alpha' | 'mihomo-smart' | 'mihomo-specific'
+  core: 'mihomo' | 'mihomo-alpha' | 'mihomo-smart' | 'mihomo-specific' | 'meow'
   specificVersion?: string
   enableSmartCore: boolean
   enableSmartOverride: boolean

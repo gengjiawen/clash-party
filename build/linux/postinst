@@ -17,6 +17,7 @@ chmod 4755 '/opt/clash-party/chrome-sandbox' 2>/dev/null || true
 chmod +sx /opt/clash-party/resources/sidecar/mihomo 2>/dev/null || true
 chmod +sx /opt/clash-party/resources/sidecar/mihomo-alpha 2>/dev/null || true
 chmod +sx /opt/clash-party/resources/sidecar/mihomo-smart 2>/dev/null || true
+chmod +sx /opt/clash-party/resources/sidecar/meow 2>/dev/null || true
 
 if hash update-mime-database 2>/dev/null; then
     update-mime-database /usr/share/mime || true

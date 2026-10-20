@@ -87,6 +87,7 @@ export async function setupFirewall(): Promise<void> {
     const rules = [
       { name: 'mihomo', program: mihomoCorePath('mihomo') },
       { name: 'mihomo-alpha', program: mihomoCorePath('mihomo-alpha') },
+      { name: 'meow', program: mihomoCorePath('meow') },
       { name: 'Mihomo Party', program: exePath() }
     ]
     for (const rule of rules) {

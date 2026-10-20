@@ -238,6 +238,7 @@
   "mihomo.alphaVersion": "预览版",
   "mihomo.smartVersion": "Smart 版",
   "mihomo.specificVersion": "特定版本",
+  "mihomo.meowVersion": "meow",
   "mihomo.selectSpecificVersion": "选择特定版本",
   "mihomo.searchVersion": "搜索版本...",
   "mihomo.installVersion": "安装版本",

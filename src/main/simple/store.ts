@@ -18,6 +18,7 @@ import {
   type SimpleState,
   type SimplePreview
 } from '../../shared/simple-config'
+import { toMeowConfig } from '../core/meow'
 import { compileSimpleConfig, type SimpleSharedConfig } from './compiler'
 import { resolveSimpleDraft } from './subscriptions'
 import {
@@ -103,7 +104,11 @@ export async function compileAndWriteSimple(
   if (result.errors.length) return result
   await mkdir(mihomoWorkDir(), { recursive: true })
   await atomicWriteFile(simpleOutputPath(), result.yaml, { encoding: 'utf8' })
-  await atomicWriteFile(mihomoWorkConfigPath('work'), result.yaml, { encoding: 'utf8' })
+  const { getAppConfig } = await import('../config/app')
+  const { core } = await getAppConfig()
+  const workYaml =
+    core === 'meow' ? stringify(toMeowConfig(parse(result.yaml) as IMihomoConfig)) : result.yaml
+  await atomicWriteFile(mihomoWorkConfigPath('work'), workYaml, { encoding: 'utf8' })
   return result
 }
 export async function commitSimpleState(

@@ -59,7 +59,8 @@ const CoreMap = {
   mihomo: 'mihomo.stableVersion',
   'mihomo-alpha': 'mihomo.alphaVersion',
   'mihomo-smart': 'mihomo.smartVersion',
-  'mihomo-specific': 'mihomo.specificVersion'
+  'mihomo-specific': 'mihomo.specificVersion',
+  meow: 'mihomo.meowVersion'
 }
 
 interface WebUIPanelOption {
@@ -217,7 +218,8 @@ const Mihomo: React.FC = () => {
 
   const saveExternalUiUrl = async (): Promise<void> => {
     await onChangeNeedRestart({ 'external-ui-url': externalUiUrlInput })
-    await upgradeExternalUi()
+    // meow 没有 /upgrade/ui
+    if (core !== 'meow') await upgradeExternalUi()
   }
 
   const openExternalUi = (): void => {
@@ -421,42 +423,45 @@ const Mihomo: React.FC = () => {
                 </div>
               }
               actions={
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    isIconOnly
-                    title={t('mihomo.upgradeCore')}
-                    variant="light"
-                    isLoading={upgrading}
-                    onPress={async () => {
-                      try {
-                        setUpgrading(true)
-                        await mihomoUpgrade()
-                        setTimeout(() => {
-                          PubSub.publish('mihomo-core-changed')
-                        }, 2000)
-                        if (platform !== 'win32') {
-                          new Notification(t('mihomo.coreAuthLost'), {
-                            body: t('mihomo.coreUpgradeSuccess')
-                          })
+                // meow 由安装包内置，升级和指定版本都只针对 mihomo
+                core !== 'meow' && (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      isIconOnly
+                      title={t('mihomo.upgradeCore')}
+                      variant="light"
+                      isLoading={upgrading}
+                      onPress={async () => {
+                        try {
+                          setUpgrading(true)
+                          await mihomoUpgrade()
+                          setTimeout(() => {
+                            PubSub.publish('mihomo-core-changed')
+                          }, 2000)
+                          if (platform !== 'win32') {
+                            new Notification(t('mihomo.coreAuthLost'), {
+                              body: t('mihomo.coreUpgradeSuccess')
+                            })
+                          }
+                        } catch (e) {
+                          if (typeof e === 'string' && e.includes('already using latest version')) {
+                            new Notification(t('mihomo.alreadyLatestVersion'))
+                          } else {
+                            toast.error(String(e))
+                          }
+                        } finally {
+                          setUpgrading(false)
                         }
-                      } catch (e) {
-                        if (typeof e === 'string' && e.includes('already using latest version')) {
-                          new Notification(t('mihomo.alreadyLatestVersion'))
-                        } else {
-                          toast.error(String(e))
-                        }
-                      } finally {
-                        setUpgrading(false)
-                      }
-                    }}
-                  >
-                    <IoMdCloudDownload className="text-lg" />
-                  </Button>
-                  <Button size="sm" variant="light" onPress={handleOpenModal}>
-                    {t('mihomo.selectSpecificVersion')}
-                  </Button>
-                </div>
+                      }}
+                    >
+                      <IoMdCloudDownload className="text-lg" />
+                    </Button>
+                    <Button size="sm" variant="light" onPress={handleOpenModal}>
+                      {t('mihomo.selectSpecificVersion')}
+                    </Button>
+                  </div>
+                )
               }
               divider={enableSmartCore && core === 'mihomo-smart'}
             >
@@ -473,7 +478,7 @@ const Mihomo: React.FC = () => {
                 disallowEmptySelection={true}
                 onSelectionChange={async (v) => {
                   const selectedCore = v.currentKey as
-                    'mihomo' | 'mihomo-alpha' | 'mihomo-smart' | 'mihomo-specific'
+                    'mihomo' | 'mihomo-alpha' | 'mihomo-smart' | 'mihomo-specific' | 'meow'
                   // 如果切换到特定版本但没有设置 specificVersion，则打开选择模态框
                   if (selectedCore === 'mihomo-specific' && !specificVersion) {
                     handleOpenModal()
@@ -488,6 +493,7 @@ const Mihomo: React.FC = () => {
                   <SelectItem key="mihomo-smart">{t(CoreMap['mihomo-smart'])}</SelectItem>
                 ) : null}
                 <SelectItem key="mihomo-specific">{t(CoreMap['mihomo-specific'])}</SelectItem>
+                {__LEGACY_BUILD__ ? null : <SelectItem key="meow">{t(CoreMap['meow'])}</SelectItem>}
               </Select>
             </SettingItem>
 
@@ -1094,16 +1100,18 @@ const Mihomo: React.FC = () => {
                   title={t('settings.webui.panel')}
                   actions={
                     <>
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        isLoading={upgradingExternalUi}
-                        title={t('settings.webui.update')}
-                        onPress={upgradeExternalUi}
-                      >
-                        <IoMdCloudDownload className="text-lg" />
-                      </Button>
+                      {core !== 'meow' && (
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          isLoading={upgradingExternalUi}
+                          title={t('settings.webui.update')}
+                          onPress={upgradeExternalUi}
+                        >
+                          <IoMdCloudDownload className="text-lg" />
+                        </Button>
+                      )}
                       <Button
                         isIconOnly
                         size="sm"

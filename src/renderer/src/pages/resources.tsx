@@ -24,7 +24,8 @@ const Resources: React.FC = () => {
       header={simple ? <EditModeMenu enabled={editing} onChange={setEditing} /> : undefined}
     >
       {core === 'mihomo-smart' && <SmartModel />}
-      <GeoData />
+      {/* meow 不读 geox-url / geo-auto-update，也没有 /upgrade/geo */}
+      {core !== 'meow' && <GeoData />}
       {!simple && <ProxyProvider />}
       <RuleProvider editing={simple && editing} />
     </BasePage>

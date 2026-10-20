@@ -12,12 +12,13 @@ import { createLogger } from '../utils/logger'
 import { mihomoWorkConfigPath } from '../utils/dirs'
 import { generateProfile, getRuntimeConfig } from './factory'
 import { syncControlDnsAfterApply } from './dnsOverrideGuard'
-import { getMihomoIpcPath, hasCoreProcess, restartCore } from './manager'
+import { getMeowController, getMihomoIpcPath, hasCoreProcess, restartCore } from './manager'
+import { toMeowConfig } from './meow'
 
 const mihomoApiLogger = createLogger('MihomoApi')
 
 let axiosIns: AxiosInstance | null = null
-let currentIpcPath: string = ''
+let currentTarget: string = ''
 
 const MAX_RETRY = 10
 const RECONNECT_INTERVAL_MS = 1000
@@ -149,9 +150,16 @@ function closeErroredStreamSocket(
 
 function createMihomoWebSocket(endpoint: string): {
   ws: WebSocket
-  ipcPath: string
+  target: string
   wsUrl: string
 } {
+  const controller = getMeowController()
+  if (controller) {
+    const wsUrl = `ws://${controller.address}${endpoint}`
+    const headers = controller.secret ? { Authorization: `Bearer ${controller.secret}` } : {}
+    return { ws: new WebSocket(wsUrl, { headers }), target: controller.address, wsUrl }
+  }
+
   const ipcPath = getMihomoIpcPath()
   const wsUrl = `ws://localhost${endpoint}`
 
@@ -161,36 +169,47 @@ function createMihomoWebSocket(endpoint: string): {
 
   return {
     ws: new WebSocket(wsUrl, { createConnection: createIpcConnection }),
-    ipcPath,
+    target: ipcPath,
     wsUrl
   }
 }
 
 export const getAxios = async (force: boolean = false): Promise<AxiosInstance> => {
-  const dynamicIpcPath = getMihomoIpcPath()
+  const controller = getMeowController()
+  const target = controller ? controller.address : getMihomoIpcPath()
+  // secret 每次启动 meow 都会换，地址不变时也要重建实例
+  const targetKey = controller ? `${controller.address}#${controller.secret}` : target
 
-  if (axiosIns && !force && currentIpcPath === dynamicIpcPath) {
+  if (axiosIns && !force && currentTarget === targetKey) {
     return axiosIns
   }
 
-  currentIpcPath = dynamicIpcPath
-  mihomoApiLogger.info(`Creating axios instance with path: ${dynamicIpcPath}`)
+  currentTarget = targetKey
+  mihomoApiLogger.info(`Creating axios instance with path: ${target}`)
 
-  axiosIns = axios.create({
-    baseURL: `http://localhost`,
-    socketPath: dynamicIpcPath,
-    timeout: 15000
-  })
+  axiosIns = controller
+    ? axios.create({
+        baseURL: `http://${controller.address}`,
+        headers: controller.secret ? { Authorization: `Bearer ${controller.secret}` } : {},
+        // 回环地址上的控制器不能被 HTTP(S)_PROXY 环境变量转给代理
+        proxy: false,
+        timeout: 15000
+      })
+    : axios.create({
+        baseURL: `http://localhost`,
+        socketPath: target,
+        timeout: 15000
+      })
 
   axiosIns.interceptors.response.use(
     (response) => {
       return response.data
     },
     (error) => {
-      if (error.code === 'ENOENT') {
-        mihomoApiLogger.debug(`Pipe not ready: ${error.config?.socketPath}`)
+      if (error.code === 'ENOENT' || (controller && error.code === 'ECONNREFUSED')) {
+        mihomoApiLogger.debug(`Pipe not ready: ${target}`)
       } else {
-        mihomoApiLogger.error(`Axios error with path ${dynamicIpcPath}: ${error.message}`)
+        mihomoApiLogger.error(`Axios error with path ${target}: ${error.message}`)
       }
 
       if (error.response && error.response.data) {
@@ -210,7 +229,7 @@ export async function mihomoVersion(): Promise<IMihomoVersion> {
 export const patchMihomoConfig = async (patch: Partial<IMihomoConfig>): Promise<void> => {
   const patchConfig = async (): Promise<void> => {
     const instance = await getAxios()
-    await instance.patch('/configs', patch)
+    await instance.patch('/configs', getMeowController() ? toMeowConfig(patch) : patch)
   }
 
   // Configuration patches can also be the first recovery action after startup
@@ -509,9 +528,9 @@ const mihomoTraffic = async (): Promise<void> => {
   const generation = beginStreamConnection(trafficStream)
   if (generation === null) return
 
-  const { ws, ipcPath, wsUrl } = createMihomoWebSocket('/traffic')
+  const { ws, target, wsUrl } = createMihomoWebSocket('/traffic')
 
-  mihomoApiLogger.info(`Creating traffic WebSocket with URL: ${wsUrl}, IPC path: ${ipcPath}`)
+  mihomoApiLogger.info(`Creating traffic WebSocket with URL: ${wsUrl}, IPC path: ${target}`)
   trafficStream.ws = ws
 
   ws.onmessage = (e): void => {

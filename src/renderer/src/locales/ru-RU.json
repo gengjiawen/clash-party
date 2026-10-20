@@ -231,6 +231,7 @@
   "mihomo.alphaVersion": "Альфа",
   "mihomo.smartVersion": "Smart",
   "mihomo.specificVersion": "Выбрать версию",
+  "mihomo.meowVersion": "meow",
   "mihomo.selectSpecificVersion": "Выбрать определённую версию",
   "mihomo.searchVersion": "Поиск версии...",
   "mihomo.installVersion": "Установить версию",

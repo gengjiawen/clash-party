@@ -15,7 +15,7 @@ const execPromise = promisify(exec)
 const execFilePromise = promisify(execFile)
 
 // 内核名称白名单
-const ALLOWED_CORES = ['mihomo', 'mihomo-alpha', 'mihomo-smart'] as const
+const ALLOWED_CORES = ['mihomo', 'mihomo-alpha', 'mihomo-smart', 'meow'] as const
 type AllowedCore = (typeof ALLOWED_CORES)[number]
 type StopCoreBeforeAdminRestart = (force?: boolean) => Promise<void>
 
@@ -128,8 +128,8 @@ export async function checkHighPrivilegeCore(): Promise<boolean> {
 async function checkHighPrivilegeMihomoProcess(): Promise<boolean> {
   const mihomoExecutables =
     process.platform === 'win32'
-      ? ['mihomo.exe', 'mihomo-alpha.exe', 'mihomo-smart.exe']
-      : ['mihomo', 'mihomo-alpha', 'mihomo-smart']
+      ? ['mihomo.exe', 'mihomo-alpha.exe', 'mihomo-smart.exe', 'meow.exe']
+      : ['mihomo', 'mihomo-alpha', 'mihomo-smart', 'meow']
 
   try {
     if (process.platform === 'win32') {
@@ -183,7 +183,7 @@ async function checkHighPrivilegeMihomoProcess(): Promise<boolean> {
           if (
             proc &&
             typeof proc.Name === 'string' &&
-            proc.Name.toLowerCase().includes('mihomo') &&
+            mihomoExecutables.includes(`${proc.Name.toLowerCase()}.exe`) &&
             proc.Path === null
           ) {
             return true

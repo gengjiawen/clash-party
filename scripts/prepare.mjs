@@ -118,6 +118,40 @@ async function getLatestReleaseVersion() {
   }
 }
 
+/* ======= meow ======= */
+const MEOW_LATEST_URL = 'https://github.com/meow-rs/meow-rs/releases/latest'
+const MEOW_URL_PREFIX = 'https://github.com/meow-rs/meow-rs/releases/download'
+let MEOW_VERSION
+
+const MEOW_MAP = {
+  'win32-x64': 'x86_64-pc-windows-msvc',
+  'win32-ia32': 'i686-pc-windows-msvc',
+  'win32-arm64': 'aarch64-pc-windows-msvc',
+  'darwin-x64': 'x86_64-apple-darwin',
+  'darwin-arm64': 'aarch64-apple-darwin',
+  // musl 版是静态链接，不依赖发行版的 glibc 版本
+  'linux-x64': 'x86_64-unknown-linux-musl',
+  'linux-arm64': 'aarch64-unknown-linux-musl'
+}
+
+// meow 不发布 version.txt，releases/latest 会跳转到最新版本的 tag 页面
+async function getLatestMeowVersion() {
+  try {
+    const response = await fetch(MEOW_LATEST_URL, {
+      method: 'HEAD'
+    })
+    const v = response.url.split('/').pop()
+    if (!response.ok || !/^v\d/.test(v)) {
+      throw new Error(`unexpected release URL: ${response.url}`)
+    }
+    MEOW_VERSION = v
+    console.log(`Latest meow version: ${MEOW_VERSION}`)
+  } catch (error) {
+    console.error('Error fetching latest meow version:', error.message)
+    process.exit(1)
+  }
+}
+
 /*
  * check available
  */
@@ -130,6 +164,10 @@ if (!MIHOMO_ALPHA_MAP[`${platform}-${arch}`]) {
 }
 
 if (!MIHOMO_SMART_MAP[`${platform}-${arch}`]) {
+  throw new Error(`unsupported platform "${platform}-${arch}"`)
+}
+
+if (!MEOW_MAP[`${platform}-${arch}`]) {
   throw new Error(`unsupported platform "${platform}-${arch}"`)
 }
 
@@ -186,6 +224,25 @@ function mihomoSmart() {
     downloadURL
   }
 }
+function meow() {
+  const target = MEOW_MAP[`${platform}-${arch}`]
+  const isWin = platform === 'win32'
+  const urlExt = isWin ? 'zip' : 'tar.gz'
+  const name = `meow-${MEOW_VERSION}-${target}`
+  // 压缩包里是 meow-<版本>-<target>/ 目录，可执行文件在目录内
+  const exeFile = `${name}/meow${isWin ? '.exe' : ''}`
+  const zipFile = `${name}.${urlExt}`
+  const downloadURL = `${MEOW_URL_PREFIX}/${MEOW_VERSION}/${zipFile}`
+
+  return {
+    name: 'meow',
+    targetFile: `meow${isWin ? '.exe' : ''}`,
+    exeFile,
+    zipFile,
+    downloadURL
+  }
+}
+
 /**
  * download sidecar and rename
  */
@@ -217,6 +274,15 @@ async function resolveSidecar(binInfo) {
       zip.extractAllTo(tempDir, true)
       fs.renameSync(tempExe, sidecarPath)
       console.log(`[INFO]: "${name}" unzip finished`)
+    } else if (zipFile.endsWith('.tar.gz')) {
+      await extract({
+        cwd: tempDir,
+        file: tempZip
+      })
+      fs.renameSync(tempExe, sidecarPath)
+      console.log(`[INFO]: "${name}" untar finished`)
+      execSync(`chmod 755 ${sidecarPath}`)
+      console.log(`[INFO]: "${name}" chmod binary finished`)
     } else if (zipFile.endsWith('.tgz')) {
       // tgz
       fs.mkdirSync(tempDir, { recursive: true })
@@ -523,6 +589,13 @@ const tasks = [
     func: () => getLatestSmartVersion().then(() => resolveSidecar(mihomoSmart())),
     retry: 5
   },
+  {
+    name: 'meow',
+    func: () => getLatestMeowVersion().then(() => resolveSidecar(meow())),
+    retry: 5,
+    // meow 的 Windows 版需要 Windows 10 及以上，Win7 构建不打包
+    skip: process.env.LEGACY_BUILD === 'true'
+  },
   { name: 'mmdb', func: resolveMmdb, retry: 5 },
   { name: 'metadb', func: resolveMetadb, retry: 5 },
   { name: 'geosite', func: resolveGeosite, retry: 5 },
@@ -578,6 +651,7 @@ const tasks = [
 async function runTask() {
   const task = tasks.shift()
   if (!task) return
+  if (task.skip) return runTask()
   if (task.winOnly && platform !== 'win32') return runTask()
   if (task.linuxOnly && platform !== 'linux') return runTask()
   if (task.unixOnly && platform === 'win32') return runTask()

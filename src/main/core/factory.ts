@@ -28,6 +28,7 @@ import { DEFAULT_CONTROL_DNS, DEFAULT_CONTROL_SNIFF } from '../../shared/appConf
 import { atomicWriteFile } from '../utils/safeFile'
 import { compileSimpleRuntime } from '../simple/service'
 import { evaluateDnsOverrideGuard, type DnsOverrideGuardResult } from './dnsOverrideGuard'
+import { toMeowConfig } from './meow'
 
 const factoryLogger = createLogger('Factory')
 const SMART_OVERRIDE_ID = 'smart-core-override'
@@ -243,7 +244,9 @@ export async function generateProfile(
   if (['info', 'debug'].includes(coreProfile['log-level']) === false) {
     coreProfile['log-level'] = 'info'
   }
-  const coreConfigStr = stringify(coreProfile)
+  const coreConfigStr = stringify(
+    appConfig.core === 'meow' ? toMeowConfig(coreProfile) : coreProfile
+  )
   if (diffWorkDir && options.outputPath === undefined) {
     await prepareProfileWorkDir(profileId)
   }

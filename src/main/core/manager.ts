@@ -62,6 +62,7 @@ import {
   verifyProcessOwner
 } from './process'
 import { setPublicDNS, recoverDNS } from './dns'
+import { resolveMeowController, type MeowController } from './meow'
 
 // 重新导出权限相关函数
 export {
@@ -91,7 +92,7 @@ const coreShutdownTimeout = 3000
 const resumeReloadDelay = 5000
 // 同一次失败内核可能连打多行，10 秒内只提示一次，避免弹窗刷屏
 const tunFailureReportInterval = 10000
-const coreProcessNames = ['mihomo', 'mihomo-alpha', 'mihomo-smart'] as const
+const coreProcessNames = ['mihomo', 'mihomo-alpha', 'mihomo-smart', 'meow'] as const
 
 // 核心进程状态
 interface CoreProcessWatchdog {
@@ -100,6 +101,8 @@ interface CoreProcessWatchdog {
 }
 
 let child: ChildProcess | null = null
+// 当前内核是 meow 时的 TCP 外部控制器；mihomo 走 IPC，为 null
+let meowController: MeowController | null = null
 let coreProcessWatchdog: CoreProcessWatchdog | null = null
 let isRestarting = false
 let coreOperationPhase: 'initializing' | 'ready' | 'blocked' | 'shutting-down' = 'ready'
@@ -416,12 +419,18 @@ export const getMihomoIpcPath = (): string => {
   return `/tmp/mihomo-party-${uid}-${processId}.sock`
 }
 
+export function getMeowController(): MeowController | null {
+  return meowController
+}
+
 // 核心配置接口
 interface CoreConfig {
+  core: string
   corePath: string
   workDir: string
   safePath?: string
   ipcPath: string
+  meowController?: MeowController
   logLevel: LogLevel
   tunEnabled: boolean
   autoSetDNS: boolean
@@ -433,8 +442,10 @@ interface CoreConfig {
   dnsGuard: DnsOverrideGuardResult
 }
 
-function buildCoreEnv(safePath?: string, ageSecretKey?: string): NodeJS.ProcessEnv {
+function buildCoreEnv(safePath?: string, ageSecretKey?: string, core?: string): NodeJS.ProcessEnv {
   const env = { ...process.env }
+  // meow 默认给日志着色；内核日志文件和启动检测都按纯文本处理
+  if (core === 'meow') env.NO_COLOR = '1'
   const normalizedAgeSecretKey = parseAgeSecretKeys(ageSecretKey).join('\n')
   if (normalizedAgeSecretKey) {
     env.CLASH_AGE_SECRET_KEY = normalizedAgeSecretKey
@@ -507,15 +518,27 @@ async function prepareCore(detached: boolean, skipStop = false): Promise<CoreCon
     await validateWindowsPipeAccess(ipcPath)
   }
 
-  const startupMode: CoreStartupMode = coreStartupMode === 'post-up' ? 'post-up' : 'log'
+  // meow 不支持 -post-up / -post-down，只能按日志判断就绪
+  const startupMode: CoreStartupMode =
+    coreStartupMode === 'post-up' && core !== 'meow' ? 'post-up' : 'log'
   const startupHook =
     !detached && startupMode === 'post-up' ? await createCoreStartupHook() : undefined
 
+  if (core === 'meow') {
+    const runtime = await getRuntimeConfig()
+    meowController = await resolveMeowController(runtime['external-controller'], runtime.secret)
+    managerLogger.info(`Using meow external controller: ${meowController.address}`)
+  } else {
+    meowController = null
+  }
+
   return {
+    core,
     corePath: mihomoCorePath(core),
     workDir: diffWorkDir ? mihomoProfileWorkDir(current) : mihomoWorkDir(),
     safePath: diffWorkDir ? mihomoWorkDir() : undefined,
     ipcPath,
+    meowController: meowController ?? undefined,
     logLevel,
     tunEnabled: tun?.enable ?? false,
     autoSetDNS,
@@ -531,10 +554,12 @@ async function prepareCore(detached: boolean, skipStop = false): Promise<CoreCon
 // 启动核心进程
 function spawnCoreProcess(config: CoreConfig): ChildProcess {
   const {
+    core,
     corePath,
     workDir,
     safePath,
     ipcPath,
+    meowController: controller,
     cpuPriority,
     ageSecretKey,
     detached,
@@ -542,7 +567,9 @@ function spawnCoreProcess(config: CoreConfig): ChildProcess {
     startupHook
   } = config
 
-  const args = ['-d', workDir, ctlParam, ipcPath]
+  const args = controller
+    ? ['-d', workDir, '--ext-ctl', controller.listen, '--secret', controller.secret]
+    : ['-d', workDir, ctlParam, ipcPath]
   if (startupHook) {
     args.push('-post-up', startupHook.postUpCommand, '-post-down', startupHook.postDownCommand)
     managerLogger.info(`Core startup mode: post-up, post-up command: ${startupHook.postUpCommand}`)
@@ -553,7 +580,7 @@ function spawnCoreProcess(config: CoreConfig): ChildProcess {
   const proc = spawn(corePath, args, {
     detached,
     stdio: detached ? 'ignore' : undefined,
-    env: buildCoreEnv(safePath, ageSecretKey)
+    env: buildCoreEnv(safePath, ageSecretKey, core)
   })
 
   if (process.platform === 'win32' && proc.pid) {
@@ -581,7 +608,7 @@ function setupCoreListeners(
   resolve: (value: Promise<void>[]) => void,
   reject: (reason: unknown) => void
 ): void {
-  const { logLevel, startupMode } = config
+  const { logLevel, startupMode, meowController: controller } = config
   let startupSettled = false
   const startupTimer =
     startupMode === 'log'
@@ -691,9 +718,14 @@ function setupCoreListeners(
     // 其它虚拟网卡创建失败：内核只打印 "Start TUN listening error" 并在 ReCreateTun 的 defer 里
     // 把 tun.enable 置回 false，自身继续运行，界面却仍显示虚拟网卡已开启，
     // 用户只能看到"开了没效果"。把内核原始错误反馈出来，并同步关掉开关。
+    // meow 的对应日志是 "TUN listener failed to start"，同样会把 tun.enable 回滚为 false
     const tunListenErrorLine = str
       .split('\n')
-      .find((line: string) => line.includes('Start TUN listening error'))
+      .find(
+        (line: string) =>
+          line.includes('Start TUN listening error') ||
+          line.includes('TUN listener failed to start')
+      )
     if (tunListenErrorLine && Date.now() - lastTunFailureAt > tunFailureReportInterval) {
       lastTunFailureAt = Date.now()
       managerLogger.error('TUN listening error detected:', tunListenErrorLine.trim())
@@ -739,6 +771,17 @@ function setupCoreListeners(
     }
 
     if (startupMode === 'post-up') {
+      return
+    }
+
+    // meow 在 API 开始监听前就已加载完 provider，不会打印 mihomo 的
+    // "start initial compatible provider default"，就绪后直接完成启动
+    if (controller) {
+      if (str.includes('REST API listening on')) {
+        startMihomoApiStreams()
+          .then(() => resolveStartup([completeCoreStartup()]))
+          .catch(rejectStartup)
+      }
       return
     }
 
@@ -1108,7 +1151,7 @@ export async function checkProfileConfig(
       corePath,
       ['-t', '-f', configPath, '-d', opts.workDir ?? mihomoTestDir()],
       {
-        env: buildCoreEnv(undefined, ageSecretKey),
+        env: buildCoreEnv(undefined, ageSecretKey, core),
         signal: opts.signal,
         timeout: opts.timeoutMs
       }

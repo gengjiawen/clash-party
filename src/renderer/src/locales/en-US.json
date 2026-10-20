@@ -238,6 +238,7 @@
   "mihomo.alphaVersion": "Alpha",
   "mihomo.smartVersion": "Smart",
   "mihomo.specificVersion": "Specific Version",
+  "mihomo.meowVersion": "meow",
   "mihomo.selectSpecificVersion": "Select Specific Version",
   "mihomo.searchVersion": "Search version...",
   "mihomo.installVersion": "Install Version",
