@@ -423,45 +423,45 @@ const Mihomo: React.FC = () => {
                 </div>
               }
               actions={
-                // meow 由安装包内置，升级和指定版本都只针对 mihomo
-                core !== 'meow' && (
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      isIconOnly
-                      title={t('mihomo.upgradeCore')}
-                      variant="light"
-                      isLoading={upgrading}
-                      onPress={async () => {
-                        try {
-                          setUpgrading(true)
-                          await mihomoUpgrade()
-                          setTimeout(() => {
-                            PubSub.publish('mihomo-core-changed')
-                          }, 2000)
-                          if (platform !== 'win32') {
-                            new Notification(t('mihomo.coreAuthLost'), {
-                              body: t('mihomo.coreUpgradeSuccess')
-                            })
-                          }
-                        } catch (e) {
-                          if (typeof e === 'string' && e.includes('already using latest version')) {
-                            new Notification(t('mihomo.alreadyLatestVersion'))
-                          } else {
-                            toast.error(String(e))
-                          }
-                        } finally {
-                          setUpgrading(false)
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    isIconOnly
+                    title={t('mihomo.upgradeCore')}
+                    variant="light"
+                    isLoading={upgrading}
+                    onPress={async () => {
+                      try {
+                        setUpgrading(true)
+                        await mihomoUpgrade()
+                        setTimeout(() => {
+                          PubSub.publish('mihomo-core-changed')
+                        }, 2000)
+                        if (platform !== 'win32') {
+                          new Notification(t('mihomo.coreAuthLost'), {
+                            body: t('mihomo.coreUpgradeSuccess')
+                          })
                         }
-                      }}
-                    >
-                      <IoMdCloudDownload className="text-lg" />
-                    </Button>
+                      } catch (e) {
+                        if (typeof e === 'string' && e.includes('already using latest version')) {
+                          new Notification(t('mihomo.alreadyLatestVersion'))
+                        } else {
+                          toast.error(String(e))
+                        }
+                      } finally {
+                        setUpgrading(false)
+                      }
+                    }}
+                  >
+                    <IoMdCloudDownload className="text-lg" />
+                  </Button>
+                  {/* meow 只升级到最新正式版，指定版本只针对 mihomo */}
+                  {core !== 'meow' && (
                     <Button size="sm" variant="light" onPress={handleOpenModal}>
                       {t('mihomo.selectSpecificVersion')}
                     </Button>
-                  </div>
-                )
+                  )}
+                </div>
               }
               divider={enableSmartCore && core === 'mihomo-smart'}
             >

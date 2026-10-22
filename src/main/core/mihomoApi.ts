@@ -10,6 +10,7 @@ import { floatingWindow } from '../resolve/floatingWindow'
 import { recordTrafficUsage } from '../traffic/recorder'
 import { createLogger } from '../utils/logger'
 import { mihomoWorkConfigPath } from '../utils/dirs'
+import { upgradeMeowCore } from '../utils/github'
 import { generateProfile, getRuntimeConfig } from './factory'
 import { syncControlDnsAfterApply } from './dnsOverrideGuard'
 import { getMeowController, getMihomoIpcPath, hasCoreProcess, restartCore } from './manager'
@@ -451,6 +452,9 @@ export const mihomoGroupDelay = async (group: string, url?: string): Promise<IMi
 }
 
 export const mihomoUpgrade = async (): Promise<void> => {
+  // meow 没有 /upgrade，由应用下载最新 release 替换内核
+  const { core } = await getAppConfig()
+  if (core === 'meow') return await upgradeMeowCore()
   const instance = await getAxios()
   return await instance.post('/upgrade', undefined, { timeout: 90000 })
 }

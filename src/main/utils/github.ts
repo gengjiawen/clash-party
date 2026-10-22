@@ -1,16 +1,29 @@
-import { chmodSync, createWriteStream, createReadStream, existsSync, renameSync, rmSync } from 'fs'
-import { writeFile } from 'fs/promises'
+import { execFile } from 'child_process'
+import { createHash } from 'crypto'
+import {
+  chmodSync,
+  createWriteStream,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync
+} from 'fs'
+import { readFile, writeFile } from 'fs/promises'
 import { platform } from 'os'
-import { join } from 'path'
+import { basename, join } from 'path'
+import { promisify } from 'util'
 import { createGunzip } from 'zlib'
 import AdmZip from 'adm-zip'
-import { stopCore } from '../core/manager'
+import { extract } from 'tar'
+import { restartCore, stopCore } from '../core/manager'
 import { getAppConfig } from '../config'
-import { mihomoCoreDir } from './dirs'
+import { mihomoCoreDir, mihomoCorePath } from './dirs'
 import * as chromeRequest from './chromeRequest'
 import { createLogger } from './logger'
 
 const log = createLogger('GitHub')
+const execFilePromise = promisify(execFile)
 
 const GITHUB_PROXIES = [
   'https://gh-proxy.org',
@@ -60,6 +73,17 @@ const PLATFORM_MAP: Record<string, string> = {
   'darwin-arm64': 'mihomo-darwin-arm64',
   'linux-x64': 'mihomo-linux-amd64-compatible',
   'linux-arm64': 'mihomo-linux-arm64'
+}
+
+// meow 的 release 资产名用 Rust target；Linux 用静态链接的 musl 版
+const MEOW_PLATFORM_MAP: Record<string, string> = {
+  'win32-x64': 'x86_64-pc-windows-msvc',
+  'win32-ia32': 'i686-pc-windows-msvc',
+  'win32-arm64': 'aarch64-pc-windows-msvc',
+  'darwin-x64': 'x86_64-apple-darwin',
+  'darwin-arm64': 'aarch64-apple-darwin',
+  'linux-x64': 'x86_64-unknown-linux-musl',
+  'linux-arm64': 'aarch64-unknown-linux-musl'
 }
 
 const versionCache = new Map<string, VersionCache>()
@@ -281,4 +305,113 @@ export async function installMihomoCore(version: string): Promise<void> {
       `Failed to install core: ${error instanceof Error ? error.message : String(error)}`
     )
   }
+}
+
+// `meow -v` 输出形如 "Meow Meta 0.26.1"，读不到时返回空串
+async function installedMeowVersion(corePath: string): Promise<string> {
+  try {
+    const { stdout } = await execFilePromise(corePath, ['-v'], { timeout: 5000 })
+    const version = stdout.trim().split(/\s+/).pop()
+    return version ? `v${version}` : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 把 meow 内核升级到最新正式版。meow 没有 mihomo 的 /upgrade 接口，
+ * 由应用下载 release 包、校验 sha256 后替换内核文件并重启内核
+ */
+export async function upgradeMeowCore(): Promise<void> {
+  const plat = platform()
+  const target = MEOW_PLATFORM_MAP[`${plat}-${process.arch}`]
+  if (!target) {
+    throw new Error(`Unsupported platform "${plat}-${process.arch}"`)
+  }
+
+  const response = await chromeRequest.get<{ tag_name?: string }>(
+    `${GITHUB_API_CONFIG.BASE_URL}/repos/meow-rs/meow-rs/releases/latest`,
+    {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': GITHUB_API_CONFIG.API_VERSION
+      },
+      responseType: 'json',
+      timeout: 10000
+    }
+  )
+  const version = response.data?.tag_name
+  if (response.status !== 200 || !version) {
+    throw new Error(`GitHub API error: HTTP ${response.status} ${response.statusText}`)
+  }
+
+  const corePath = mihomoCorePath('meow')
+  // 和 mihomo 的 /upgrade 报同样的错，界面据此提示已是最新版本
+  if ((await installedMeowVersion(corePath)) === version) {
+    throw new Error('already using latest version')
+  }
+  log.info(`Upgrading meow core to ${version}`)
+
+  const isWin = plat === 'win32'
+  const asset = `meow-${version}-${target}.${isWin ? 'zip' : 'tar.gz'}`
+  const downloadURL = `https://github.com/meow-rs/meow-rs/releases/download/${version}/${asset}`
+  const exeFile = basename(corePath)
+  // 放在内核目录里：目录不可写时下载前就失败，替换也是同一文件系统内的原子 rename
+  const stagingDir = join(mihomoCoreDir(), 'meow-upgrade')
+  const archivePath = join(stagingDir, asset)
+  const checksumPath = `${archivePath}.sha256`
+  const stagedExe = join(stagingDir, exeFile)
+
+  try {
+    rmSync(stagingDir, { recursive: true, force: true })
+    mkdirSync(stagingDir)
+    await downloadGitHubAsset(downloadURL, archivePath)
+    await downloadGitHubAsset(`${downloadURL}.sha256`, checksumPath)
+    // 校验文件内容形如 "<sha256>  <文件名>"
+    const expected = (await readFile(checksumPath, 'utf8')).trim().split(/\s+/)[0]
+    const actual = createHash('sha256')
+      .update(await readFile(archivePath))
+      .digest('hex')
+    if (expected !== actual) {
+      throw new Error(`Checksum mismatch for ${asset}`)
+    }
+
+    // 压缩包里是 meow-<版本>-<target>/ 目录，只取出其中的可执行文件
+    if (isWin) {
+      const zip = new AdmZip(archivePath)
+      const entry = zip.getEntries().find((e) => e.entryName.endsWith(`/${exeFile}`))
+      if (!entry) throw new Error(`Executable file not found in zip: ${exeFile}`)
+      zip.extractEntryTo(entry, stagingDir, false, true)
+    } else {
+      await extract({
+        file: archivePath,
+        cwd: stagingDir,
+        strip: 1,
+        filter: (entryPath) => entryPath.endsWith(`/${exeFile}`)
+      })
+    }
+    if (!existsSync(stagedExe)) {
+      throw new Error(`Executable file not found in archive: ${exeFile}`)
+    }
+    chmodSync(stagedExe, 0o755)
+
+    // Windows 上运行中的内核文件不能被覆盖，先停内核再替换
+    await stopCore(true)
+    try {
+      renameSync(stagedExe, corePath)
+    } catch (error) {
+      // 替换失败时把旧版本内核重新拉起来
+      await restartCore().catch((e) => log.error('Failed to restart core', e))
+      throw error
+    }
+    log.info(`Successfully upgraded meow core to ${version}`)
+  } catch (error) {
+    log.error('Failed to upgrade meow core', error)
+    throw new Error(
+      `Failed to upgrade core: ${error instanceof Error ? error.message : String(error)}`
+    )
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true })
+  }
+  await restartCore()
 }
