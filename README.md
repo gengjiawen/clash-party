@@ -35,7 +35,7 @@
 - [x] 开箱即用，无需服务模式的 Tun
 - [x] 多种配色主题可选，UI 焕然一新
 - [x] 支持大部分 Mihomo(Clash Meta) 常用配置修改
-- [x] 内置 Smart内核 与 Mihomo(Clash Meta) 内核
+- [x] 内置 Smart内核、Mihomo(Clash Meta) 内核与 [meow](https://github.com/meow-rs/meow-rs) 内核
 - [x] 通过 WebDAV 一键备份和恢复配置
 - [x] 强大的覆写功能，任意修订配置文件
 - [x] 深度集成 Sub-Store，轻松管理订阅
