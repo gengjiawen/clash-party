@@ -24,6 +24,7 @@ package() {
     chmod +sx ${pkgdir}/opt/clash-party/resources/sidecar/mihomo
     chmod +sx ${pkgdir}/opt/clash-party/resources/sidecar/mihomo-alpha
     chmod +sx ${pkgdir}/opt/clash-party/resources/sidecar/mihomo-smart
+    chmod +sx ${pkgdir}/opt/clash-party/resources/sidecar/meow
     install -Dm755 "${srcdir}/${_pkgname}.sh" "${pkgdir}/usr/bin/${_pkgname}"
     sed -i '3s!/opt/clash-party/mihomo-party!mihomo-party!' "${pkgdir}/usr/share/applications/${_pkgname}.desktop"
 

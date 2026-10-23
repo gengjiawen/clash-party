@@ -14,7 +14,7 @@ import { upgradeMeowCore } from '../utils/github'
 import { generateProfile, getRuntimeConfig } from './factory'
 import { syncControlDnsAfterApply } from './dnsOverrideGuard'
 import { getMeowController, getMihomoIpcPath, hasCoreProcess, restartCore } from './manager'
-import { toMeowConfig } from './meow'
+import { meowControllerChanged, toMeowConfig } from './meow'
 
 const mihomoApiLogger = createLogger('MihomoApi')
 
@@ -475,6 +475,17 @@ export const mihomoHotReloadConfig = async (): Promise<void> => {
   // 否则界面上改动的 Smart 选项会沿用旧脚本，要等到下次重启内核才生效
   await manageSmartOverride()
   const { profileId: current, dnsGuard } = await generateProfile()
+  const meowController = getMeowController()
+  if (meowController) {
+    const runtime = await getRuntimeConfig()
+    if (meowControllerChanged(meowController, runtime['external-controller'], runtime.secret)) {
+      mihomoApiLogger.info(
+        'meow external controller changed, restarting core instead of hot reload'
+      )
+      await restartCore()
+      return
+    }
+  }
   const appConfig = await getAppConfig()
   const diffWorkDir = appConfig.operationMode === 'simple' ? false : appConfig.diffWorkDir === true
   const configPath = diffWorkDir ? mihomoWorkConfigPath(current) : mihomoWorkConfigPath('work')

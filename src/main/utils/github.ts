@@ -344,6 +344,10 @@ export async function upgradeMeowCore(): Promise<void> {
   if (response.status !== 200 || !version) {
     throw new Error(`GitHub API error: HTTP ${response.status} ${response.statusText}`)
   }
+  // tag 会拼进下载地址和本地文件名，只接受 v 加数字开头、不含路径分隔符的形式
+  if (!/^v\d[\w.-]*$/.test(version)) {
+    throw new Error(`Unexpected meow release tag: ${version}`)
+  }
 
   const corePath = mihomoCorePath('meow')
   // 和 mihomo 的 /upgrade 报同样的错，界面据此提示已是最新版本
@@ -368,7 +372,7 @@ export async function upgradeMeowCore(): Promise<void> {
     await downloadGitHubAsset(downloadURL, archivePath)
     await downloadGitHubAsset(`${downloadURL}.sha256`, checksumPath)
     // 校验文件内容形如 "<sha256>  <文件名>"
-    const expected = (await readFile(checksumPath, 'utf8')).trim().split(/\s+/)[0]
+    const expected = (await readFile(checksumPath, 'utf8')).trim().split(/\s+/)[0].toLowerCase()
     const actual = createHash('sha256')
       .update(await readFile(archivePath))
       .digest('hex')

@@ -862,7 +862,8 @@ export async function convertMrsRuleset(filePath: string, behavior: string): Pro
   }
 
   const { core = 'mihomo' } = await getAppConfig()
-  const corePath = mihomoCorePath(core)
+  // meow 没有 convert-ruleset 子命令，借用一起打包的 mihomo 转换
+  const corePath = mihomoCorePath(core === 'meow' ? 'mihomo' : core)
   const { diffWorkDir = false } = await getAppConfig()
   const { current } = await getProfileConfig()
   let fullPath: string
